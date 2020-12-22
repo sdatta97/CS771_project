@@ -4,7 +4,6 @@ Our project is based on the work of
 Zhewei Huang, Wen Heng, and Shuchang Zhou. Learning to paint with model-based deep re-inforcement learning. InProceedings of the IEEE/CVF International Conference on ComputerVision (ICCV), October 2019
 ```
 **You can run the project using the [google colab](https://colab.research.google.com/drive/1cZ8tpdh2SC1d4KDW5NXERbipTcxZyTsf?usp=sharing)**
-## Abstract
 
 ## Installation
 Use [anaconda](https://conda.io/miniconda.html) to manage environment
