@@ -3,7 +3,10 @@ import scipy.misc
 from io import BytesIO
 import tensorboardX as tb
 from tensorboardX.summary import Summary
-
+try:
+    import Image
+except ImportError:
+    from PIL import Image
 class TensorBoard(object):
     def __init__(self, model_dir):
         self.summary_writer = tb.FileWriter(model_dir)
@@ -17,8 +20,10 @@ class TensorBoard(object):
         elif type(img) == PIL.Image.Image:
             pass
         else:
-            img = scipy.misc.toimage(img)
-
+            #img = scipy.misc.toimage(img)
+            img = Image.fromarray(img)
+            if img.mode != 'RGB':
+              img = img.convert('RGB')
         img.save(bio, format="png")
         image_summary = Summary.Image(encoded_image_string=bio.getvalue())
         summary.value.add(tag=tag, image=image_summary)

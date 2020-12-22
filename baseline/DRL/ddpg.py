@@ -19,6 +19,9 @@ for i in range(128):
 coord = coord.to(device)
 
 criterion = nn.MSELoss()
+def weighted_mse_loss(input, target, weight, rate):
+    weights = Variable(torch.Tensor(weight**rate))
+    return torch.sum( ((input - target) ** 2) * (weights.cuda()))
 
 Decoder = FCN()
 Decoder.load_state_dict(torch.load('../renderer.pkl'))
@@ -113,7 +116,7 @@ class DDPG(object):
                 self.writer.add_scalar('train/gan_reward', gan_reward.mean(), self.log)
             return (Q + gan_reward), gan_reward
     
-    def update_policy(self, lr):
+    def update_policy(self, lr, rate):
         self.log += 1
         
         for param_group in self.critic_optim.param_groups:
@@ -123,7 +126,7 @@ class DDPG(object):
             
         # Sample batch
         state, action, reward, \
-            next_state, terminal = self.memory.sample_batch(self.batch_size, device)
+            next_state, terminal, importance, indices = self.memory.sample_batch(self.batch_size, device)
 
         self.update_gan(next_state)
         
@@ -131,11 +134,13 @@ class DDPG(object):
             next_action = self.play(next_state, True)
             target_q, _ = self.evaluate(next_state, next_action, True)
             target_q = self.discount * ((1 - terminal.float()).view(-1, 1)) * target_q
-                
         cur_q, step_reward = self.evaluate(state, action)
         target_q += step_reward.detach()
-        
-        value_loss = criterion(cur_q, target_q)
+        # with torch.no_grad():
+        errors = cur_q.detach() - target_q.detach()
+        # value_loss = criterion(cur_q, target_q)
+        value_loss = weighted_mse_loss(cur_q, target_q, importance, rate)
+        self.memory.set_priorities(indices, errors)
         self.critic.zero_grad()
         value_loss.backward(retain_graph=True)
         self.critic_optim.step()
