@@ -7,13 +7,18 @@ from DRL.evaluator import Evaluator
 from utils.util import *
 from utils.tensorboard import TensorBoard
 import time
-
+import pandas as pd
 exp = os.path.abspath('.').split('/')[-1]
 writer = TensorBoard('../train_log/{}'.format(exp))
 os.system('ln -sf ../train_log/{} ./log'.format(exp))
 os.system('mkdir ./model')
 
+
 def train(agent, env, evaluate):
+    global df_reward, df_critic_loss
+    df_critic_loss = pd.DataFrame(columns=['critic_loss'])
+    df_val_reward = pd.DataFrame(columns=['val_reward'])
+    df_reward = pd.DataFrame(columns=['reward'])
     train_times = args.train_times
     env_batch = args.env_batch
     validate_interval = args.validate_interval
@@ -27,6 +32,9 @@ def train(agent, env, evaluate):
     tot_reward = 0.
     observation = None
     noise_factor = args.noise_factor
+    EPSILON = 0.6
+    MIN_EPSILON = 0.0001
+    EPSILON_DECAY = np.power(MIN_EPSILON,(1/(args.train_times)))
     while step <= train_times:
         step += 1
         episode_steps += 1
@@ -36,6 +44,8 @@ def train(agent, env, evaluate):
             agent.reset(observation, noise_factor)    
         action = agent.select_action(observation, noise_factor=noise_factor)
         observation, reward, done, _ = env.step(action)
+        if episode % validate_interval == 0:
+          df_reward = df_reward.append({'reward': np.mean(reward)}, ignore_index=True)
         agent.observe(reward, observation, done, step)
         if (episode_steps >= max_step and max_step):
             if step > args.warmup:
@@ -43,6 +53,7 @@ def train(agent, env, evaluate):
                 if episode > 0 and validate_interval > 0 and episode % validate_interval == 0:
                     reward, dist = evaluate(env, agent.select_action, debug=debug)
                     if debug: prRed('Step_{:07d}: mean_reward:{:.3f} mean_dist:{:.3f} var_dist:{:.3f}'.format(step - 1, np.mean(reward), np.mean(dist), np.var(dist)))
+                    df_reward = df_reward.append({'val_reward': np.mean(reward)}, ignore_index=True)
                     writer.add_scalar('validate/mean_reward', np.mean(reward), step)
                     writer.add_scalar('validate/mean_dist', np.mean(dist), step)
                     writer.add_scalar('validate/var_dist', np.var(dist), step)
@@ -59,12 +70,14 @@ def train(agent, env, evaluate):
                 else:
                     lr = (3e-5, 1e-4)
                 for i in range(episode_train_times):
-                    Q, value_loss = agent.update_policy(lr)
+                    Q, value_loss = agent.update_policy(lr, rate = 1-EPSILON)
                     tot_Q += Q.data.cpu().numpy()
                     tot_value_loss += value_loss.data.cpu().numpy()
                 writer.add_scalar('train/critic_lr', lr[0], step)
                 writer.add_scalar('train/actor_lr', lr[1], step)
                 writer.add_scalar('train/Q', tot_Q / episode_train_times, step)
+                if episode % validate_interval == 0:
+                  df_critic_loss = df_critic_loss.append({'critic_loss': tot_value_loss / episode_train_times}, ignore_index=True)
                 writer.add_scalar('train/critic_loss', tot_value_loss / episode_train_times, step)
             if debug: prBlack('#{}: steps:{} interval_time:{:.2f} train_time:{:.2f}' \
                 .format(episode, step, train_time_interval, time.time()-time_stamp)) 
@@ -73,6 +86,12 @@ def train(agent, env, evaluate):
             observation = None
             episode_steps = 0
             episode += 1
+            if EPSILON > MIN_EPSILON:
+              EPSILON *= EPSILON_DECAY
+              EPSILON = max(MIN_EPSILON, EPSILON)
+    df_critic_loss.to_csv(r'critic_loss.csv')
+    df_reward.to_csv(r'reward.csv')
+    df_val_reward.to_csv(r'val_reward.csv')
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Learning to Paint')
@@ -86,7 +105,7 @@ if __name__ == "__main__":
     parser.add_argument('--tau', default=0.001, type=float, help='moving average for target network')
     parser.add_argument('--max_step', default=40, type=int, help='max length for episode')
     parser.add_argument('--noise_factor', default=0, type=float, help='noise level for parameter space noise')
-    parser.add_argument('--validate_interval', default=50, type=int, help='how many episodes to perform a validation')
+    parser.add_argument('--validate_interval', default=25, type=int, help='how many episodes to perform a validation')
     parser.add_argument('--validate_episodes', default=5, type=int, help='how many episode to perform during validation')
     parser.add_argument('--train_times', default=2000000, type=int, help='total traintimes')
     parser.add_argument('--episode_train_times', default=10, type=int, help='train times for each episode')    
